@@ -49,7 +49,7 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let sources = Sources::from_env()?;
-    let graph = Graph::load(&sources)?;
+    let graph = Graph::load(&sources);
 
     match &cli.command {
         Command::Nodes { kind, format } => {

@@ -31,6 +31,10 @@ impl Sources {
     /// - `ATLAS_BUILD_MANIFEST`
     /// - `ATLAS_DREAM_MANIFEST`
     /// - `ATLAS_REPOS`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `HOME` environment variable is not set.
     pub fn from_env() -> Result<Self> {
         let home = dirs_home()?;
         Ok(Self {
@@ -63,9 +67,13 @@ fn env_path_or(var: &str, default: PathBuf) -> PathBuf {
 /// Frontmatter fields extracted from a PRD file.
 #[derive(Debug, Default)]
 pub struct PrdFrontmatter {
+    /// PRD title from the H1 line (e.g. "atlas-core — the corpus, as a graph").
     pub title: String,
+    /// Vision slug this PRD belongs to (may be empty if not declared).
     pub vision: String,
+    /// Build target declared in frontmatter (e.g. "rust-cli").
     pub build_target: String,
+    /// Build-into path declared in frontmatter (may be empty).
     pub build_into: String,
 }
 
@@ -124,10 +132,7 @@ fn extract_bold_field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     let prefix = format!("**{key}**");
     let line = line.strip_prefix(&prefix)?.trim_start_matches(':').trim();
     // Strip trailing inline comment.
-    let value = match line.find(" # ") {
-        Some(pos) => &line[..pos],
-        None => line,
-    };
+    let value = line.find(" # ").map_or(line, |pos| &line[..pos]);
     Some(value.trim())
 }
 
@@ -142,9 +147,13 @@ fn strip_vision_path(raw: &str) -> String {
 /// Minimal shape of a build-manifest PRD entry.
 #[derive(Debug, Deserialize)]
 pub struct BuildManifestEntry {
+    /// PRD file path from the manifest.
     pub path: Option<String>,
+    /// Local output repo path if shipped.
     pub output_repo_path: Option<String>,
+    /// GitHub repo URL if shipped.
     pub output_repo_url: Option<String>,
+    /// Build status string (e.g. `"shipped"`, `"in_progress"`).
     pub status: Option<String>,
 }
 
@@ -159,6 +168,10 @@ struct BuildManifest {
 ///
 /// Returns a map from PRD basename (e.g. "PRD-atlas-core.md") to entry.
 /// Missing or malformed entries are silently dropped (tolerant).
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read or parsed as JSON.
 pub fn parse_build_manifest(path: &Path) -> Result<HashMap<String, BuildManifestEntry>> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("reading build manifest: {}", path.display()))?;
@@ -184,31 +197,50 @@ pub fn parse_build_manifest(path: &Path) -> Result<HashMap<String, BuildManifest
 /// Minimal shape of a dream-manifest vision entry.
 #[derive(Debug, Deserialize)]
 pub struct DreamVisionEntry {
+    /// Path to the vision file on disk.
     pub path: Option<String>,
+    /// Vision status string (e.g. "active", "complete").
     pub status: Option<String>,
+    /// PRD slugs drafted by this vision.
     pub prds_drafted: Option<Vec<String>>,
+    /// One-line seed description.
     pub seed: Option<String>,
 }
 
+/// Raw dream manifest: visions is a heterogeneous map — most values are objects
+/// (`DreamVisionEntry`) but some keys (e.g. `_no_fleet_passes`) hold arrays.
+/// We parse as `serde_json::Value` first, then filter + coerce.
 #[derive(Debug, Deserialize)]
-struct DreamManifest {
-    visions: HashMap<String, DreamVisionEntry>,
+struct DreamManifestRaw {
+    visions: HashMap<String, serde_json::Value>,
 }
 
 /// Parse the dream manifest JSON.
 ///
-/// Excludes the `_no_fleet_passes` sentinel key.
+/// Excludes the `_no_fleet_passes` sentinel key and any value that is not a
+/// JSON object (the sentinel is an array and would panic a typed deserialize).
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read or parsed as JSON.
 pub fn parse_dream_manifest(path: &Path) -> Result<HashMap<String, DreamVisionEntry>> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("reading dream manifest: {}", path.display()))?;
-    let manifest: DreamManifest = serde_json::from_str(&content)
+    let raw: DreamManifestRaw = serde_json::from_str(&content)
         .with_context(|| format!("parsing dream manifest: {}", path.display()))?;
 
-    Ok(manifest
-        .visions
-        .into_iter()
-        .filter(|(k, _)| k != "_no_fleet_passes")
-        .collect())
+    let mut map = HashMap::new();
+    for (k, v) in raw.visions {
+        // Skip the sentinel and any non-object entries.
+        if k == "_no_fleet_passes" || !v.is_object() {
+            continue;
+        }
+        // Tolerantly deserialize: skip entries that don't match the shape.
+        if let Ok(entry) = serde_json::from_value::<DreamVisionEntry>(v) {
+            map.insert(k, entry);
+        }
+    }
+    Ok(map)
 }
 
 // ── REPOS.md parser ──────────────────────────────────────────────────────────
@@ -217,6 +249,10 @@ pub fn parse_dream_manifest(path: &Path) -> Result<HashMap<String, DreamVisionEn
 ///
 /// Looks for markdown list items containing a hyperlink: `- [name](url) — desc`
 /// or `- **[name](url)** — desc`. Tolerates arbitrary formatting around entries.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read.
 pub fn parse_repos_md(path: &Path) -> Result<Vec<RepoNode>> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("reading REPOS.md: {}", path.display()))?;
@@ -230,32 +266,59 @@ pub fn parse_repos_md(path: &Path) -> Result<Vec<RepoNode>> {
     Ok(repos)
 }
 
-/// Try to parse a single REPOS.md line into a RepoNode.
+/// Try to parse a single REPOS.md line into a `RepoNode`.
+///
+/// Handles two formats:
+/// - List items: `- [name](url) — description`
+/// - Table rows:  `| [name](url) | binary | description |`
+///   (skips header/divider rows that have no `](` link pattern)
 fn parse_repos_md_line(line: &str) -> Option<RepoNode> {
     let trimmed = line.trim();
-    // Must be a list item.
-    if !trimmed.starts_with("- ") && !trimmed.starts_with("* ") {
+
+    // Must be a list item OR a table row (starts with `|`).
+    let is_list = trimmed.starts_with("- ") || trimmed.starts_with("* ");
+    let is_table = trimmed.starts_with('|');
+    if !is_list && !is_table {
         return None;
     }
 
-    // Find `[name](url)` pattern.
+    // Find `[name](url)` pattern anywhere on the line.
     let link_start = trimmed.find('[')? ;
     let link_end = trimmed[link_start..].find(']')? + link_start;
+    // Must be followed by `(` for a real link (not just `[text]` without URL).
     let url_start = trimmed[link_end..].find('(')? + link_end;
     let url_end = trimmed[url_start..].find(')')? + url_start;
 
-    let name = trimmed[link_start + 1..link_end].to_string();
-    let url = trimmed[url_start + 1..url_end].to_string();
+    // Validate URL looks like a github link (skip divider rows like `|---|---|`).
+    let url = &trimmed[url_start + 1..url_end];
+    if url.is_empty() || url.starts_with('-') {
+        return None;
+    }
 
-    // Rest of line after `)` is the description.
-    let rest = trimmed[url_end + 1..].trim();
-    let description = rest
-        .trim_start_matches(" —")
-        .trim_start_matches("—")
-        .trim_start_matches(" -")
-        .trim_start_matches('-')
-        .trim()
-        .to_string();
+    let name = trimmed[link_start + 1..link_end].to_string();
+    let url = url.to_string();
+
+    // Extract description:
+    // - List: rest of line after `)`.
+    // - Table: last non-empty `|`-delimited cell after splitting.
+    let description = if is_table {
+        // Split by `|`, collect non-empty trimmed cells, take the last one.
+        let cells: Vec<&str> = trimmed
+            .split('|')
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .collect();
+        // The last cell is the description; first is `[name](url)`, second is binary.
+        cells.last().copied().unwrap_or("").to_string()
+    } else {
+        let rest = trimmed[url_end + 1..].trim();
+        rest.trim_start_matches(" —")
+            .trim_start_matches('—')
+            .trim_start_matches(" -")
+            .trim_start_matches('-')
+            .trim()
+            .to_string()
+    };
 
     Some(RepoNode {
         name,
@@ -266,13 +329,17 @@ fn parse_repos_md_line(line: &str) -> Option<RepoNode> {
 
 // ── PRD directory scanner ────────────────────────────────────────────────────
 
-/// Scan the autobuilder directory for PRD files and parse each into a PrdNode.
+/// Scan the autobuilder directory for PRD files and parse each into a `PrdNode`.
 ///
 /// Joins with the build-manifest map to derive status and repo info.
 /// Never panics on malformed PRD content.
-pub fn scan_prd_nodes(
+///
+/// # Errors
+///
+/// Returns an error if the autobuilder directory cannot be read.
+pub fn scan_prd_nodes<S: std::hash::BuildHasher>(
     autobuilder_dir: &Path,
-    build_map: &HashMap<String, BuildManifestEntry>,
+    build_map: &HashMap<String, BuildManifestEntry, S>,
 ) -> Result<Vec<PrdNode>> {
     let mut nodes = Vec::new();
 
@@ -284,7 +351,11 @@ pub fn scan_prd_nodes(
         let fname = entry.file_name();
         let filename = fname.to_string_lossy().to_string();
 
-        if !filename.starts_with("PRD-") || !filename.ends_with(".md") {
+        if !filename.starts_with("PRD-")
+            || !std::path::Path::new(&filename)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        {
             continue;
         }
         // Skip archived PRDs if they somehow appear.
@@ -292,15 +363,13 @@ pub fn scan_prd_nodes(
             .path()
             .parent()
             .and_then(|p| p.file_name())
-            .map(|n| n == "PRDs-archive")
-            .unwrap_or(false)
+            .is_some_and(|n| n == "PRDs-archive")
         {
             continue;
         }
 
-        let content = match std::fs::read_to_string(entry.path()) {
-            Ok(c) => c,
-            Err(_) => continue, // skip unreadable files
+        let Ok(content) = std::fs::read_to_string(entry.path()) else {
+            continue; // skip unreadable files
         };
 
         let fm = parse_prd_frontmatter(&content);
@@ -325,9 +394,9 @@ pub fn scan_prd_nodes(
 }
 
 /// Derive PRD status from the build-manifest map.
-fn derive_prd_status(
+fn derive_prd_status<S: std::hash::BuildHasher>(
     filename: &str,
-    build_map: &HashMap<String, BuildManifestEntry>,
+    build_map: &HashMap<String, BuildManifestEntry, S>,
 ) -> (PrdStatus, String, String) {
     let Some(entry) = build_map.get(filename) else {
         return (PrdStatus::Drafted, String::new(), String::new());
@@ -350,10 +419,10 @@ fn derive_prd_status(
     (PrdStatus::InFlight, repo_url, repo_path)
 }
 
-/// Convert dream manifest entries to VisionNodes.
+/// Convert dream manifest entries to `VisionNode`s.
 #[must_use]
-pub fn dream_entries_to_vision_nodes(
-    entries: HashMap<String, DreamVisionEntry>,
+pub fn dream_entries_to_vision_nodes<S: std::hash::BuildHasher>(
+    entries: HashMap<String, DreamVisionEntry, S>,
     autobuilder_dir: &Path,
 ) -> Vec<VisionNode> {
     let mut nodes: Vec<VisionNode> = entries
@@ -454,6 +523,23 @@ mod tests {
     #[test]
     fn test_parse_repos_md_line_header_skipped() {
         let line = "## Category";
+        assert!(parse_repos_md_line(line).is_none());
+    }
+
+    #[test]
+    fn test_parse_repos_md_line_table_format() {
+        // The actual REPOS.md format: `| [name](url) | binary | description |`
+        let line = "| [agorabus](https://github.com/j0yen/agorabus) | `agorabus` | Single-host advisory pub/sub bus |";
+        let node = parse_repos_md_line(line).unwrap();
+        assert_eq!(node.name, "agorabus");
+        assert_eq!(node.url, "https://github.com/j0yen/agorabus");
+        assert_eq!(node.description, "Single-host advisory pub/sub bus");
+    }
+
+    #[test]
+    fn test_parse_repos_md_line_table_divider_skipped() {
+        // Divider row: `|---|---|---|`
+        let line = "|---|---|---|";
         assert!(parse_repos_md_line(line).is_none());
     }
 

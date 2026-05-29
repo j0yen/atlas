@@ -49,7 +49,7 @@ pub enum PrdStatus {
     Drafted,
     /// Manifest entry exists but not yet shipped.
     InFlight,
-    /// output_repo_path in manifest is non-empty and exists on disk.
+    /// `output_repo_path` in manifest is non-empty and exists on disk.
     Shipped,
 }
 

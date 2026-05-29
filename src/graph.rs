@@ -1,7 +1,5 @@
 //! In-memory graph loaded from the corpus sources.
 
-use anyhow::Result;
-
 use crate::model::{PrdNode, RepoNode, VisionNode};
 use crate::parsers::{
     dream_entries_to_vision_nodes, parse_build_manifest, parse_dream_manifest, parse_repos_md,
@@ -24,7 +22,8 @@ impl Graph {
     ///
     /// Missing or unreadable source files produce partial results rather than
     /// hard errors, so `atlas` remains usable even when some sources are absent.
-    pub fn load(sources: &Sources) -> Result<Self> {
+    #[must_use]
+    pub fn load(sources: &Sources) -> Self {
         // Load build manifest (needed for PRD status derivation).
         let build_map = if sources.build_manifest.exists() {
             parse_build_manifest(&sources.build_manifest).unwrap_or_default()
@@ -54,10 +53,10 @@ impl Graph {
             Vec::new()
         };
 
-        Ok(Self {
+        Self {
             visions,
             prds,
             repos,
-        })
+        }
     }
 }

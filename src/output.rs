@@ -8,6 +8,10 @@ use crate::graph::Graph;
 use crate::model::{PrdNode, RepoNode, VisionNode};
 
 /// Output for `atlas nodes [--kind ...] [--format ...]`.
+///
+/// # Errors
+///
+/// Returns an error if writing to stdout fails.
 pub fn nodes(graph: &Graph, kind: Option<&NodeKindArg>, json: bool) -> Result<()> {
     if json {
         nodes_json(graph, kind)
@@ -82,23 +86,27 @@ fn nodes_json(graph: &Graph, kind: Option<&NodeKindArg>) -> Result<()> {
             _ => &empty_repos,
         },
     };
-    println!("{}", serde_json::to_string_pretty(&output)?);
+    let json = serde_json::to_string_pretty(&output)?;
+    writeln!(io::stdout().lock(), "{json}")?;
     Ok(())
 }
 
 /// Output for `atlas show <vision-slug> [--format ...]`.
 ///
 /// Exits with code 2 if the vision slug is unknown.
+///
+/// # Errors
+///
+/// Returns an error if writing to stdout fails.
 pub fn show(graph: &Graph, vision_slug: &str, json: bool) -> Result<()> {
     // Find the vision.
-    let vision = graph.visions.iter().find(|v| v.slug == vision_slug);
-    if vision.is_none() {
+    let Some(vision) = graph.visions.iter().find(|v| v.slug == vision_slug) else {
         // Write error to stderr and exit 2.
-        eprintln!("atlas: unknown vision slug '{vision_slug}'");
-        eprintln!("Run 'atlas nodes --kind vision' to see available slugs.");
+        let mut stderr = io::stderr();
+        writeln!(stderr, "atlas: unknown vision slug '{vision_slug}'")?;
+        writeln!(stderr, "Run 'atlas nodes --kind vision' to see available slugs.")?;
         std::process::exit(2);
-    }
-    let vision = vision.expect("checked above");
+    };
 
     // Find PRDs owned by this vision.
     let owned_prds: Vec<&PrdNode> = graph
@@ -150,6 +158,7 @@ fn show_json(vision: &VisionNode, prds: &[&PrdNode]) -> Result<()> {
         vision,
         prds: prds.to_vec(),
     };
-    println!("{}", serde_json::to_string_pretty(&output)?);
+    let json = serde_json::to_string_pretty(&output)?;
+    writeln!(io::stdout().lock(), "{json}")?;
     Ok(())
 }
