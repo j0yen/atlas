@@ -1,0 +1,137 @@
+{
+  "schema": "autobuilder.intent_card.v1",
+  "prd_source": "/home/jsy/wintermute/autobuilder/PRD-atlas-core.md",
+  "intent_slug": "atlas-core",
+  "root_motivation": "Make the autobuilder corpus a queryable object: the 107 PRDs, 24 visions, 2 manifests, and REPOS.md describe a connected graph (vision→prd→repo) but the structure lives only in the reader's head. atlas-core builds the in-memory node set that /build, /dream, and jsy can query directly — turning an implicit mental model into a machine-readable, serde-serializable graph.",
+  "user_persona": "jsy running atlas from ~/.local/bin/atlas on this laptop as part of the wintermute self-building system; also consumed by /build and /dream automation scripts that need machine-readable corpus state.",
+  "unfakeable_metric": {
+    "name": "acceptance_tests_passing_count",
+    "lower_is_better": false,
+    "harness_command": "cargo test --workspace --no-fail-fast 2>&1 | grep -cE '^test acceptance_[a-z0-9_]+ \\.\\.\\.  ok' || true",
+    "target": 9
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "level": "MUST",
+      "description": "cargo build --release produces target/release/atlas; cargo test green; cargo clippy -D warnings clean.",
+      "test": "tests/acceptance_ac1.rs: verify binary exists after build and cargo test exits 0"
+    },
+    {
+      "id": "AC2",
+      "level": "MUST",
+      "description": "atlas nodes --kind vision over the live corpus lists ≥24 vision slugs (excluding the _no_fleet_passes sentinel).",
+      "test": "tests/acceptance_ac2.rs: run atlas nodes --kind vision over fixture dir, assert ≥1 vision slug present and sentinel absent"
+    },
+    {
+      "id": "AC3",
+      "level": "MUST",
+      "description": "atlas nodes --kind prd over the live corpus lists ≥107 PRD nodes, each with derived status; no parser panic on any real PRD.",
+      "test": "tests/acceptance_ac3.rs: run atlas nodes --kind prd over fixture dir with ≥3 PRDs of varying frontmatter completeness; assert no panic, each has status field"
+    },
+    {
+      "id": "AC4",
+      "level": "MUST",
+      "description": "atlas show <vision-slug> lists PRDs for that vision with statuses; atlas show nonexistent exits 2 with stderr message.",
+      "test": "tests/acceptance_ac4.rs: fixture with a known vision slug shows ≥1 PRD; nonexistent slug exits with code 2"
+    },
+    {
+      "id": "AC5",
+      "level": "MUST",
+      "description": "A PRD whose build-manifest entry has a non-empty output_repo_path that exists on disk derives status shipped with repo_url; a PRD with no manifest entry derives drafted.",
+      "test": "tests/acceptance_ac5.rs: fixture with two PRDs (one with manifest entry+existing path, one without); assert correct status derivation"
+    },
+    {
+      "id": "AC6",
+      "level": "MUST",
+      "description": "--format json on nodes and show emits valid JSON that round-trips through python3 -m json.tool; text and json carry the same facts.",
+      "test": "tests/acceptance_ac6.rs: run atlas nodes --format json and atlas show <slug> --format json; pipe through python3 -m json.tool; assert exit 0"
+    },
+    {
+      "id": "AC7",
+      "level": "MUST",
+      "description": "Cold run of atlas nodes over the live fixture corpus completes in <200 ms (no-store budget).",
+      "test": "tests/acceptance_ac7.rs: measure wall time of atlas nodes over fixture; assert < 200ms"
+    },
+    {
+      "id": "AC8",
+      "level": "MUST",
+      "description": "All four source paths are env-overridable (ATLAS_AUTOBUILDER, ATLAS_BUILD_MANIFEST, ATLAS_DREAM_MANIFEST, ATLAS_REPOS); test suite uses fixture dirs, never live ~/.claude or ~/wintermute.",
+      "test": "tests/acceptance_ac8.rs: set all four env vars to fixture paths; assert atlas runs without touching live dirs"
+    },
+    {
+      "id": "AC9",
+      "level": "SHOULD",
+      "description": "README.md documents node model, source resolution, and the read-only invariant.",
+      "test": "tests/acceptance_ac9.rs: assert README.md contains 'node model', 'ATLAS_', and 'never writes'"
+    }
+  ],
+  "scope": [
+    "Parse PRD frontmatter from ~/wintermute/autobuilder/PRD-*.md (tolerant, line-scan, no dep)",
+    "Parse dream manifest JSON into vision nodes",
+    "Parse build manifest JSON into prd status (shipped/in-flight/drafted)",
+    "Parse REPOS.md markdown list into repo nodes",
+    "Provide in-memory graph of typed nodes: vision, prd, repo",
+    "Expose atlas nodes [--kind vision|prd|repo] [--format text|json] command",
+    "Expose atlas show <vision-slug> [--format text|json] command",
+    "atlas --version and atlas --help",
+    "All source paths env-overridable for testing"
+  ],
+  "non_goals": [
+    "No persistent store — reads source files fresh on each invocation; never writes SQLite, JSON cache, or any file",
+    "No dependency edges between PRDs (atlas-edges is a follow-on PRD)",
+    "No divergence/orphan lint (atlas-orphans is follow-on)",
+    "No graph rendering, DOT, or Mermaid output (atlas-render is follow-on)",
+    "No writes to PRDs, manifests, gossip, or REPOS.md — ever",
+    "No network access — all data is local files"
+  ],
+  "hard_constraints": {
+    "rust_edition": "2024",
+    "target_kind": "cli",
+    "deny_unsafe": true,
+    "max_deps": 8,
+    "msrv": "1.85",
+    "additional": {
+      "no_let_chains": "MSRV 1.85 — do not use let-chains (stabilized in 1.88)",
+      "deps_allowed": "serde, serde_json, clap, anyhow; no SQLite, no fastembed, no tokio",
+      "read_only_invariant": "atlas NEVER writes any file in the corpus (PRDs, manifests, REPOS.md, gossip)"
+    }
+  },
+  "five_whys_trace": [
+    {
+      "why": 1,
+      "q": "Why does jsy want a CLI that reads PRDs, visions, and manifests and shows a graph?",
+      "a": "107 PRDs, 24 visions, two manifests, and REPOS.md describe a connected structure (vision→prd→repo) but no tool joins them — the join lives only in the reader's head."
+    },
+    {
+      "why": 2,
+      "q": "Why does the missing join matter now?",
+      "a": "PRD status (drafted/in-flight/shipped) and repo URLs are spread across the build-manifest and file frontmatter; a human must mentally correlate them on every /build and /dream cycle, which is error-prone and slow."
+    },
+    {
+      "why": 3,
+      "q": "Why can't /build and /dream just use the manifest directly?",
+      "a": "The manifest knows build state but not vision ownership; vision files know which PRDs they own but not build state; REPOS.md knows shipped repos but not their originating PRD. The join requires reading all three sources and doing the cross-reference — that's a dedicated parser, not a jq one-liner."
+    },
+    {
+      "why": 4,
+      "q": "Why build this as a standalone CLI rather than embedding it in /build or /dream as a script?",
+      "a": "Root reached: the corpus is a durable artifact that will be queried by multiple consumers (/build, /dream, future tools, jsy manually); a standalone CLI with a stable --format json interface is the right primitive — it decouples consumers from parsing details and lets atlas evolve independently."
+    }
+  ],
+  "ambiguities_resolved": [
+    {
+      "question": "Does 'shipped' status require the repo to exist on disk, or just a non-null output_repo_path in the manifest?",
+      "resolution": "AC5 in the PRD: output_repo_path must be non-empty AND exist on disk. A stale manifest entry pointing at a deleted path is not 'shipped'."
+    },
+    {
+      "question": "Should atlas nodes with no --kind flag list all node kinds mixed together or refuse?",
+      "resolution": "PRD says 'list all nodes of a kind (default: all)' — so --kind omitted means emit all nodes of all kinds."
+    },
+    {
+      "question": "What is the unfakeable metric? The PRD names both a count gate (≥107 PRD nodes, ≥24 vision slugs) and a latency gate (<200ms). Which is primary?",
+      "resolution": "acceptance_tests_passing_count is the primary scalar (the latency gate is one of 9 ACs, not the primary optimization target). The iterate-and-prove loop optimizes for all ACs green."
+    }
+  ],
+  "created_at": "2026-05-29T00:00:00Z"
+}
