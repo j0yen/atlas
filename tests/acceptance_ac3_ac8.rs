@@ -268,6 +268,7 @@ fn ac4_show_known_vision() {
         build_manifest: build,
         dream_manifest: dream,
         repos_md: repos,
+        gossip_file: tmp.path().join("gossip.md"),
     };
     let graph = atlas::graph::Graph::load(&sources);
 
@@ -356,6 +357,7 @@ fn ac8_sources_struct_accepts_arbitrary_paths() {
         build_manifest: std::path::PathBuf::from("/tmp/test-bm.json"),
         dream_manifest: std::path::PathBuf::from("/tmp/test-dm.json"),
         repos_md: std::path::PathBuf::from("/tmp/test-repos.md"),
+        gossip_file: std::path::PathBuf::from("/tmp/test-gossip.md"),
     };
 
     assert_eq!(sources.autobuilder_dir.to_str().unwrap(), "/tmp/test-ab");
@@ -383,6 +385,7 @@ fn ac8_graph_load_uses_fixture_sources() {
         build_manifest: build,
         dream_manifest: dream,
         repos_md: repos,
+        gossip_file: tmp.path().join("gossip.md"),
     };
     let graph = atlas::graph::Graph::load(&sources);
 

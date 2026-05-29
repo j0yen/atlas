@@ -1,12 +1,15 @@
 //! In-memory graph loaded from the corpus sources.
 
+use std::collections::HashSet;
+
+use crate::edges::{load_edges, EdgeIndex, EdgeSet};
 use crate::model::{PrdNode, RepoNode, VisionNode};
 use crate::parsers::{
     dream_entries_to_vision_nodes, parse_build_manifest, parse_dream_manifest, parse_repos_md,
     scan_prd_nodes, Sources,
 };
 
-/// The loaded graph: all typed nodes in memory.
+/// The loaded graph: all typed nodes and edges in memory.
 #[derive(Debug)]
 pub struct Graph {
     /// Vision nodes from the dream manifest.
@@ -15,6 +18,10 @@ pub struct Graph {
     pub prds: Vec<PrdNode>,
     /// Repo nodes from REPOS.md.
     pub repos: Vec<RepoNode>,
+    /// Dependency edges (frontmatter + gossip, deduplicated).
+    pub edge_set: EdgeSet,
+    /// Fast-lookup index for edges.
+    pub edge_index: EdgeIndex,
 }
 
 impl Graph {
@@ -53,10 +60,30 @@ impl Graph {
             Vec::new()
         };
 
+        // Build known-filenames set for edge resolution.
+        let known_filenames: HashSet<String> =
+            prds.iter().map(|p| p.filename.clone()).collect();
+
+        // Load edges (tolerant: partial results on error).
+        let gossip_path = if sources.gossip_file.exists() {
+            Some(sources.gossip_file.as_path())
+        } else {
+            None
+        };
+        let edge_set = if sources.autobuilder_dir.exists() {
+            load_edges(&sources.autobuilder_dir, gossip_path, &known_filenames)
+                .unwrap_or_default()
+        } else {
+            EdgeSet::default()
+        };
+        let edge_index = EdgeIndex::build(&edge_set);
+
         Self {
             visions,
             prds,
             repos,
+            edge_set,
+            edge_index,
         }
     }
 }

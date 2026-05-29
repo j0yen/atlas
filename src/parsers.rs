@@ -21,6 +21,8 @@ pub struct Sources {
     pub dream_manifest: PathBuf,
     /// Path to REPOS.md.
     pub repos_md: PathBuf,
+    /// Path to the gossip file (notes/gossip.md).  Optional: missing → no gossip edges.
+    pub gossip_file: PathBuf,
 }
 
 impl Sources {
@@ -48,6 +50,10 @@ impl Sources {
                 home.join(".claude/skills/dream/state/manifest.json"),
             ),
             repos_md: env_path_or("ATLAS_REPOS", home.join("wintermute/REPOS.md")),
+            gossip_file: env_path_or(
+                "ATLAS_GOSSIP",
+                home.join("wintermute/autobuilder/notes/gossip.md"),
+            ),
         })
     }
 }

@@ -44,6 +44,20 @@ enum Command {
         #[arg(long, default_value = "text")]
         format: FormatArg,
     },
+    /// Show dependencies for a PRD (what it waits on, what waits on it).
+    Deps {
+        /// PRD filename (e.g. "PRD-atlas-edges.md") or slug (e.g. "atlas-edges").
+        prd: String,
+        /// Output format.
+        #[arg(long, default_value = "text")]
+        format: FormatArg,
+    },
+    /// List PRDs that are blocked by at least one un-shipped dependency.
+    Blocked {
+        /// Output format.
+        #[arg(long, default_value = "text")]
+        format: FormatArg,
+    },
 }
 
 fn main() -> Result<()> {
@@ -58,6 +72,14 @@ fn main() -> Result<()> {
         Command::Show { vision, format } => {
             let json = matches!(format, FormatArg::Json);
             output::show(&graph, vision, json)?;
+        }
+        Command::Deps { prd, format } => {
+            let json = matches!(format, FormatArg::Json);
+            output::deps(&graph, prd, json)?;
+        }
+        Command::Blocked { format } => {
+            let json = matches!(format, FormatArg::Json);
+            output::blocked(&graph, json)?;
         }
     }
 
