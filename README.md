@@ -36,11 +36,31 @@ and `atlas show <vision>`, every command offering `--format json`.
 All four paths are env-overridable, and the test suite drives parsers off fixture
 directories — never touching live `~/.claude` or `~/wintermute` paths.
 
+## Edge model
+
+Dependency edges connect PRDs that declare `**Depends on:**` frontmatter or appear
+in `Order:` blocks in `notes/gossip.md`.
+
+| field    | notes                                                                  |
+|----------|------------------------------------------------------------------------|
+| `from`   | dependent PRD filename                                                 |
+| `to`     | prerequisite PRD filename                                              |
+| `kind`   | `frontmatter` (authoritative) or `gossip` (best-effort)               |
+| `source` | `file:line` provenance of the edge                                     |
+
+**Precedence rule:** when both sources assert the same `(from, to)` pair, the
+frontmatter edge wins and the gossip edge is silently dropped.  A gossip-only
+edge is kept and tagged `kind: gossip` so callers can see it is the softer
+signal.  Endpoints that cannot be resolved to a known PRD are dropped and
+counted in the `unresolved` field (never panics).
+
 ## Commands
 
 ```
 atlas nodes [--kind vision|prd|repo] [--format text|json]
 atlas show <vision-slug> [--format text|json]
+atlas deps <prd> [--format text|json]
+atlas blocked [--format text|json]
 atlas --version
 atlas --help
 ```
