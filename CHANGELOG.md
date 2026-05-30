@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.0 — 2026-05-30
+
+Adds `atlas doctor`: a read-only lint that surfaces five corpus divergence
+classes invisible to manual inspection — PRDs with no vision, visions with
+no PRDs, repos with no originating PRD, shipped PRDs whose repo path is
+gone on disk, and active visions whose every drafted PRD is shipped
+(fulfilled-but-unmarked). Exit code reflects severity: 0=clean, 1=info,
+2=warn. All five classes have positive and negative fixture tests (19 doctor
+unit tests; all 50 tests green). Read-only invariant verified: no writes to
+any PRD, manifest, gossip, or REPOS.md.
+
 ## v0.2.0 — 2026-05-30
 
 Adds typed dependency edges between PRDs, closing the atlas-edges PRD.
