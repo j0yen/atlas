@@ -8,6 +8,7 @@
 #![warn(missing_docs)]
 
 pub mod args;
+pub mod doctor;
 pub mod edges;
 pub mod graph;
 pub mod model;

@@ -7,6 +7,7 @@
 
 use anyhow::Result;
 use atlas::args::{FormatArg, NodeKindArg};
+use atlas::doctor::{self, ClassFilter, FindingClass};
 use atlas::graph::Graph;
 use atlas::output;
 use atlas::parsers::Sources;
@@ -58,6 +59,46 @@ enum Command {
         #[arg(long, default_value = "text")]
         format: FormatArg,
     },
+    /// Lint the corpus for structural divergences.
+    ///
+    /// Reports five divergence classes: `prd_no_vision`, `vision_no_prd`,
+    /// `repo_no_prd`, `shipped_repo_gone`, `fulfilled_unmarked`.
+    /// Exit code reflects severity: 0=clean, 1=info-only, 2=warn.
+    Doctor {
+        /// Output format.
+        #[arg(long, default_value = "text")]
+        format: FormatArg,
+        /// Restrict output to a single divergence class.
+        #[arg(long, value_name = "CLASS")]
+        class: Option<DoctorClassArg>,
+    },
+}
+
+/// Divergence class filter for `atlas doctor`.
+#[derive(Clone, Debug, clap::ValueEnum)]
+enum DoctorClassArg {
+    /// PRD has no valid Vision: reference.
+    PrdNoVision,
+    /// Vision has no drafted PRDs.
+    VisionNoPrd,
+    /// REPOS.md entry has no originating PRD.
+    RepoNoPrd,
+    /// Manifest-shipped PRD's repo path is gone.
+    ShippedRepoGone,
+    /// Active vision whose every drafted PRD is shipped.
+    FulfilledUnmarked,
+}
+
+impl From<&DoctorClassArg> for FindingClass {
+    fn from(arg: &DoctorClassArg) -> Self {
+        match arg {
+            DoctorClassArg::PrdNoVision => Self::PrdNoVision,
+            DoctorClassArg::VisionNoPrd => Self::VisionNoPrd,
+            DoctorClassArg::RepoNoPrd => Self::RepoNoPrd,
+            DoctorClassArg::ShippedRepoGone => Self::ShippedRepoGone,
+            DoctorClassArg::FulfilledUnmarked => Self::FulfilledUnmarked,
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -80,6 +121,22 @@ fn main() -> Result<()> {
         Command::Blocked { format } => {
             let json = matches!(format, FormatArg::Json);
             output::blocked(&graph, json)?;
+        }
+        Command::Doctor { format, class } => {
+            let filter = class
+                .as_ref()
+                .map_or(ClassFilter::All, |c| ClassFilter::Only(FindingClass::from(c)));
+            let findings = doctor::run(&graph, &filter);
+            let exit = doctor::exit_code(&findings);
+            let json = matches!(format, FormatArg::Json);
+            if json {
+                doctor::render_json(&findings, &mut std::io::stdout().lock())?;
+            } else {
+                doctor::render_text(&findings, &mut std::io::stdout().lock())?;
+            }
+            if exit != 0 {
+                std::process::exit(exit);
+            }
         }
     }
 
