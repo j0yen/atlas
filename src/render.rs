@@ -107,10 +107,20 @@ fn scoped_prd_list(
     vision_slugs: &BTreeSet<String>,
     opts: &RenderOptions,
 ) -> Vec<(String, String)> {
+    // A PRD is in scope when it is owned by an in-scope vision, OR — when no
+    // explicit `--vision` filter is active — regardless of whether its `vision`
+    // field resolves to a known manifest slug. Some live PRDs carry a `vision`
+    // value that is a raw Markdown link or carries a trailing annotation (e.g.
+    // `[visions/foo.md](visions/foo.md)` or `bar.md (Fleet 4)`) that never
+    // matches a manifest slug; such PRDs must still appear as nodes in the whole
+    // -web view rather than vanish. They simply get no vision→PRD ownership edge
+    // (the edge loops match on `p.vision == slug`). Under an active vision
+    // filter we keep the strict scoping so `--vision X` stays exact.
+    let unfiltered = opts.vision_filter.is_none();
     let mut list: Vec<_> = graph
         .prds
         .iter()
-        .filter(|p| vision_slugs.contains(&p.vision) || p.vision.is_empty())
+        .filter(|p| unfiltered || vision_slugs.contains(&p.vision) || p.vision.is_empty())
         .filter(|p| !opts.shipped_only || p.status == PrdStatus::Shipped)
         .map(|p| (p.vision.clone(), p.filename.clone()))
         .collect();
@@ -404,9 +414,17 @@ pub fn render_tree(graph: &Graph, opts: &RenderOptions) -> anyhow::Result<String
     };
 
     // Group PRDs by vision for fast lookup.
+    let known: BTreeSet<&str> = graph.visions.iter().map(|v| v.slug.as_str()).collect();
     let mut by_vision: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // PRDs whose `vision` field resolves to no manifest vision (raw link /
+    // annotated slug) are bucketed under a synthetic "(unfiled)" root so they
+    // are not silently omitted from the whole-web tree view.
+    let mut unfiled: Vec<String> = Vec::new();
     for prd in &graph.prds {
         if !opts.shipped_only || prd.status == PrdStatus::Shipped {
+            if !prd.vision.is_empty() && !known.contains(prd.vision.as_str()) {
+                unfiled.push(prd.filename.clone());
+            }
             by_vision
                 .entry(prd.vision.clone())
                 .or_default()
@@ -417,8 +435,40 @@ pub fn render_tree(graph: &Graph, opts: &RenderOptions) -> anyhow::Result<String
     for filenames in by_vision.values_mut() {
         filenames.sort();
     }
+    unfiled.sort();
 
-    for slug in &vision_slugs {
+    // Roots to render: the (possibly filtered) manifest visions, plus an
+    // "(unfiled)" pseudo-root for orphan-vision PRDs when no filter is active.
+    let mut roots: Vec<String> = vision_slugs;
+    if opts.vision_filter.is_none() && !unfiled.is_empty() {
+        roots.push("(unfiled)".to_string());
+    }
+
+    for slug in &roots {
+        if slug == "(unfiled)" {
+            writeln!(buf, "vision: (unfiled)  [orphan-vision PRDs]")?;
+            let prd_count = unfiled.len();
+            for (i, filename) in unfiled.iter().enumerate() {
+                let is_last = i + 1 == prd_count;
+                let prefix = if is_last { "└──" } else { "├──" };
+                if let Some(p) = graph.prds.iter().find(|p| &p.filename == filename) {
+                    let glyph = status_glyph(&p.status);
+                    let label = p
+                        .filename
+                        .strip_prefix("PRD-")
+                        .and_then(|s| s.strip_suffix(".md"))
+                        .unwrap_or(&p.filename);
+                    let repo_str = if p.repo_url.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  → {}", p.repo_url)
+                    };
+                    writeln!(buf, "  {prefix} {glyph} {label}{repo_str}")?;
+                }
+            }
+            writeln!(buf)?;
+            continue;
+        }
         if let Some(v) = graph.visions.iter().find(|v| &v.slug == slug) {
             writeln!(buf, "vision: {slug}  [{status}]", status = v.status)?;
         } else {
