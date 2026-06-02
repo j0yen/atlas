@@ -61,9 +61,87 @@ atlas nodes [--kind vision|prd|repo] [--format text|json]
 atlas show <vision-slug> [--format text|json]
 atlas deps <prd> [--format text|json]
 atlas blocked [--format text|json]
+atlas graph [--format dot|mermaid|tree] [--vision <slug>] [--shipped-only]
 atlas --version
 atlas --help
 ```
+
+## Graph rendering
+
+`atlas graph` draws the vision→PRD→repo web as a Graphviz DOT graph, a Mermaid
+diagram, or a terminal tree.  Output is deterministic: re-running over an
+unchanged corpus produces byte-identical text, so committed `.dot`/`.mmd` files
+diff cleanly.
+
+### Mermaid — inline in markdown
+
+```bash
+atlas graph --format mermaid --vision atlas
+```
+
+```
+graph TD
+  %% Vision nodes
+  vision_atlas(("atlas"))
+  %% PRD nodes
+  prd_PRD_atlas_edges_md(["atlas-edges"])
+  prd_PRD_atlas_orphans_md(["atlas-orphans"])
+  prd_PRD_atlas_render_md(["atlas-render"])
+  %% Repo nodes
+  repo_https___github_com_j0yen_atlas[("j0yen/atlas")]
+  %% Vision to PRD edges
+  vision_atlas --> prd_PRD_atlas_edges_md
+  vision_atlas --> prd_PRD_atlas_orphans_md
+  vision_atlas --> prd_PRD_atlas_render_md
+  %% PRD dependency edges
+  prd_PRD_atlas_orphans_md --> prd_PRD_atlas_edges_md
+  prd_PRD_atlas_render_md --> prd_PRD_atlas_edges_md
+  %% Shipped PRD to Repo edges
+  prd_PRD_atlas_edges_md --> repo_https___github_com_j0yen_atlas
+  prd_PRD_atlas_orphans_md --> repo_https___github_com_j0yen_atlas
+```
+
+Node shapes encode kind: `(( ))` = vision, `[ ]` = shipped PRD, `([ ])` = in-flight
+PRD, repository nodes use `[( )]`.  Paste this block into any GitHub README or
+Mermaid Live Editor and it renders immediately.
+
+### DOT — pipe into Graphviz
+
+```bash
+atlas graph --format dot --vision atlas | dot -Tsvg -o atlas-vision.svg
+```
+
+atlas emits valid DOT text; rendering to SVG/PNG is handled by the `dot`
+binary from [Graphviz](https://graphviz.org/).  The generated digraph uses:
+
+- **ellipse / blue fill** for vision nodes
+- **box / green fill** for shipped PRDs, yellow for in-flight, grey for drafted
+- **cylinder / red fill** for repo nodes
+- **solid edges** for `frontmatter` dependencies, **dashed** for `gossip`
+
+To view the whole corpus (all visions, all PRDs):
+
+```bash
+atlas graph --format dot | dot -Tsvg -o wintermute.svg
+xdg-open wintermute.svg
+```
+
+### Tree — no Graphviz required
+
+```bash
+atlas graph --format tree --vision atlas
+```
+
+```
+vision: atlas  [active]
+  ├── ● atlas-edges  → https://github.com/j0yen/atlas
+  ├── ● atlas-orphans  ← needs: atlas-edges  → https://github.com/j0yen/atlas
+  └── ● atlas-render  ← needs: atlas-edges
+```
+
+Status glyphs: `●` shipped, `○` in-flight, `·` drafted.  Dependency arrows
+(`← needs: …`) show PRD prerequisites inline.  This is the default format
+when `--format` is omitted.
 
 ## Performance
 
