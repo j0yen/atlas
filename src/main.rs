@@ -11,7 +11,9 @@ use atlas::doctor::{self, ClassFilter, FindingClass};
 use atlas::graph::Graph;
 use atlas::output;
 use atlas::parsers::Sources;
+use atlas::render::RenderOptions;
 use clap::{Parser, Subcommand};
+use std::io::Write as _;
 
 /// atlas — query the autobuilder corpus as a typed node graph.
 #[derive(Parser, Debug)]
@@ -72,6 +74,18 @@ enum Command {
         #[arg(long, value_name = "CLASS")]
         class: Option<DoctorClassArg>,
     },
+    /// Render the vision→PRD→repo graph as DOT, Mermaid, or a terminal tree.
+    Graph {
+        /// Output format: dot, mermaid, or tree.
+        #[arg(long, default_value = "tree")]
+        format: GraphFormatArg,
+        /// Restrict graph to a single vision slug.
+        #[arg(long, value_name = "SLUG")]
+        vision: Option<String>,
+        /// Only include shipped PRDs and their repos.
+        #[arg(long)]
+        shipped_only: bool,
+    },
 }
 
 /// Divergence class filter for `atlas doctor`.
@@ -99,6 +113,17 @@ impl From<&DoctorClassArg> for FindingClass {
             DoctorClassArg::FulfilledUnmarked => Self::FulfilledUnmarked,
         }
     }
+}
+
+/// Graph render format.
+#[derive(Clone, Debug, clap::ValueEnum)]
+enum GraphFormatArg {
+    /// Graphviz DOT digraph.
+    Dot,
+    /// Mermaid graph TD block.
+    Mermaid,
+    /// Terminal tree (no Graphviz required).
+    Tree,
 }
 
 fn main() -> Result<()> {
@@ -137,6 +162,22 @@ fn main() -> Result<()> {
             if exit != 0 {
                 std::process::exit(exit);
             }
+        }
+        Command::Graph {
+            format,
+            vision,
+            shipped_only,
+        } => {
+            let opts = RenderOptions {
+                vision_filter: vision.clone(),
+                shipped_only: *shipped_only,
+            };
+            let rendered = match format {
+                GraphFormatArg::Dot => atlas::render::render_dot(&graph, &opts)?,
+                GraphFormatArg::Mermaid => atlas::render::render_mermaid(&graph, &opts)?,
+                GraphFormatArg::Tree => atlas::render::render_tree(&graph, &opts)?,
+            };
+            std::io::stdout().lock().write_all(rendered.as_bytes())?;
         }
     }
 
