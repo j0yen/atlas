@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.4.0 — 2026-06-02
+
+Adds `atlas graph` — render the vision→PRD→repo model as Graphviz DOT,
+Mermaid, or a terminal tree.
+
+**New:** `atlas graph [--format dot|mermaid|tree] [--vision <slug>] [--shipped-only]`
+
+- `--format dot` — Graphviz `digraph atlas {}`: vision nodes (ellipse, blue),
+  PRD nodes (box, colored by status: grey=drafted, amber=in-flight,
+  green=shipped), repo nodes (cylinder, red); vision→PRD edges dotted blue,
+  PRD→PRD dependency edges solid (frontmatter) or dashed (gossip),
+  shipped-PRD→repo edges gray.
+- `--format mermaid` — `graph TD` block: same topology; gossip edges `-.->`,
+  frontmatter `-->`.  Renders inline in GitHub Markdown.
+- `--format tree` — terminal tree: vision as root, PRDs indented with status
+  glyph (○ drafted / ◑ in-flight / ● shipped); dependency arrows inline.
+  Default format; no Graphviz install needed.
+- `--vision <slug>` scopes output to one vision's subgraph.
+- `--shipped-only` prunes to shipped PRDs and their repos only.
+- Output is deterministic: nodes sorted by (vision_slug, prd_filename),
+  edges by (from, to) — byte-identical on re-run with unchanged corpus.
+
+No new dependencies; pure string templating.  All edge ACs implemented
+(atlas-edges API was already present from v0.2.0).  37 new unit tests
+covering all three renderers; all 49 tests green; clippy clean.
+
 ## v0.3.0 — 2026-05-30
 
 Adds `atlas doctor`: a read-only lint that surfaces five corpus divergence
