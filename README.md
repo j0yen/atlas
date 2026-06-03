@@ -61,6 +61,7 @@ atlas nodes [--kind vision|prd|repo] [--format text|json]
 atlas show <vision-slug> [--format text|json]
 atlas deps <prd> [--format text|json]
 atlas blocked [--format text|json]
+atlas doctor [--format text|json] [--class <name>]
 atlas graph [--format dot|mermaid|tree] [--vision <slug>] [--shipped-only]
 atlas --version
 atlas --help
@@ -142,6 +143,64 @@ vision: atlas  [active]
 Status glyphs: `●` shipped, `○` in-flight, `·` drafted.  Dependency arrows
 (`← needs: …`) show PRD prerequisites inline.  This is the default format
 when `--format` is omitted.
+
+## Corpus health: `atlas doctor`
+
+`atlas doctor` is a **read-only** lint over the full corpus. It reports five
+classes of structural divergence that are invisible to manual inspection across
+a corpus of 100+ PRDs, then exits with a code that reflects the highest severity
+found. It **never writes to any PRD, manifest, gossip file, or REPOS.md** — it
+reports drift; it never repairs it.
+
+### Usage
+
+```bash
+atlas doctor                              # report all classes, text output
+atlas doctor --format json                # machine-readable JSON array
+atlas doctor --class shipped_repo_gone    # restrict to one class
+```
+
+### Divergence classes
+
+| class                | severity | fires when                                                                           |
+|----------------------|----------|--------------------------------------------------------------------------------------|
+| `prd_no_vision`      | warn     | PRD's `Vision:` field is empty or names a vision doc that does not exist             |
+| `vision_no_prd`      | info     | vision has an empty `prds_drafted` list and no PRD's `Vision:` field points at it   |
+| `repo_no_prd`        | warn     | REPOS.md entry has no originating PRD (no PRD title, slug, `build_into`, or `output_repo_path` maps to it) |
+| `shipped_repo_gone`  | warn     | build manifest records a non-empty `output_repo_path` for a PRD but that path does not exist on disk |
+| `fulfilled_unmarked` | info     | vision is marked `active` in the dream manifest but every PRD in its `prds_drafted` list derives status `shipped` |
+
+### Exit-code contract
+
+| exit | meaning                                                                     |
+|------|-----------------------------------------------------------------------------|
+| `0`  | no findings — corpus is clean                                               |
+| `1`  | only info-level findings (`vision_no_prd`, `fulfilled_unmarked`)            |
+| `2`  | at least one warn-level finding (`prd_no_vision`, `repo_no_prd`, `shipped_repo_gone`) |
+
+This contract is stable, so a caller (e.g. `self-review`) can gate on the exit
+code without parsing output.
+
+### JSON output
+
+`--format json` emits a JSON array; each element has four fields:
+
+```json
+[
+  {
+    "class":  "shipped_repo_gone",
+    "node":   "PRD-some-tool.md",
+    "detail": "output_repo_path '/home/jsy/wintermute/some-tool' does not exist on disk",
+    "source": "PRD-some-tool.md"
+  }
+]
+```
+
+### Advisory + read-only
+
+`atlas doctor` is **advisory**. It surfaces divergence for a human or skill to
+act on; it never modifies the corpus. Running it over the live corpus leaves
+every file's mtime unchanged.
 
 ## Performance
 
