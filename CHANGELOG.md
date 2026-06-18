@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.1 (2026-06-18)
+
+- fix(atlas-render): AC2 live-corpus test + stop dropping orphan-vision PRD nodes (cherry-pick from build/atlas-render)
+
+
 ## v0.4.0 — 2026-06-02
 
 Adds `atlas graph` — render the vision→PRD→repo model as Graphviz DOT,
