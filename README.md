@@ -1,15 +1,12 @@
 # atlas
 
-Queryable node graph of the wintermute PRD corpus: visions, PRDs, and shipped repos.
+The wintermute PRD corpus as a queryable graph of typed nodes — visions, PRDs, and shipped repos.
 
-107 PRDs, 24 vision docs, two manifests, and a 117-line REPOS.md describe a single
-connected structure — vision owns PRDs, PRDs ship to repos — but the structure lives
-only in the reader's head. atlas-core is the substrate that makes it a queryable
-object: parse every PRD's frontmatter, both skill manifests, and REPOS.md into one
-in-memory graph of typed nodes (vision, prd, repo), and expose it via `atlas nodes`
-and `atlas show <vision>`, every command offering `--format json`.
+The corpus already describes one connected structure: a vision owns PRDs, and PRDs ship to repos. But that structure lives only in the reader's head — spread across PRD frontmatter, two skill manifests, and `REPOS.md`, with nothing that lets you ask it a question. atlas makes it an object you can query. It parses every PRD's frontmatter, both manifests, and `REPOS.md` into one in-memory graph of typed nodes, then exposes it: `atlas nodes` lists them, `atlas show <vision>` walks one vision's PRDs, and every command takes `--format json`.
 
-**Read-only invariant:** atlas never writes to the autobuilder corpus or any manifest.
+The graph is rebuilt fresh on each invocation; there is no persistent store, so the answer always reflects the corpus as it is right now.
+
+**Read-only invariant:** atlas never writes to the autobuilder corpus or any manifest. It reports drift; it never repairs it.
 
 ## Node model
 
@@ -204,9 +201,11 @@ every file's mtime unchanged.
 
 ## Performance
 
-Cold run of `atlas nodes` over the full live corpus (107 PRDs, 24 visions,
-REPOS.md, two manifests) completes in **~23 ms** — well under the 200 ms budget.
-No persistent store; sources are parsed fresh on each invocation.
+There is no persistent store. Every command parses the PRDs, visions, manifests,
+and `REPOS.md` from scratch and builds the graph in memory, so the result is
+always current and a stale index is never a failure mode. The corpus is a few
+hundred small text files, and a cold run finishes well inside an interactive
+budget.
 
 ## Install
 
